@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+contract SubastaAvanzadaConFee {
+    address public immutable subastador;
+    uint256 public ofertaBase;
+    uint256 public ofertaMaxima;
+    address public mejorPostor;
+    bool public finalizada;
+
+    uint256 public inicio;
+    uint256 public fin;
+
+    uint256 public acumuladoPorSubastador;
+
+    uint256 constant EXTENSION_TIEMPO = 10 minutes;
+    uint256 constant INCREMENTO_MINIMO_PORCENTUAL = 5;
+    uint256 constant FEE_PORCENTUAL = 2;
+
+    mapping(address => uint256) public devoluciones;
+
+    event NuevaOferta(address indexed postor, uint256 cantidad, uint256 nuevoFin);
+    event SubastaFinalizada(address ganador, uint256 cantidad, uint256 totalComisiones);
+    event RetiroConFee(address indexed postor, uint256 devuelto, uint256 feeCobrado);
+
+    constructor() {
+        subastador = msg.sender;
+        ofertaBase = 2 ether;
+        inicio = block.timestamp;
+        fin = block.timestamp + 2 days;
+    }
+
+    function ofertar() external payable {
+        require(block.timestamp >= inicio, "La subasta aun no comienza");
+        require(block.timestamp <= fin, "La subasta ha finalizado");
+        require(!finalizada, "La subasta ya fue finalizada");
+
+        if (ofertaMaxima == 0) {
+            require(msg.value >= ofertaBase, "La oferta es menor al minimo base (2 ETH)");
+        } else {
+            uint256 incrementoMinimo = (ofertaMaxima * (100 + INCREMENTO_MINIMO_PORCENTUAL)) / 100;
+            require(msg.value >= incrementoMinimo, "Debe superar la oferta actual en al menos 5%");
+        }
+
+        if (ofertaMaxima > 0) {
+            devoluciones[mejorPostor] += ofertaMaxima;
+        }
+
+        mejorPostor = msg.sender;
+        ofertaMaxima = msg.value;
+
+        if (fin - block.timestamp <= EXTENSION_TIEMPO) {
+            fin = block.timestamp + EXTENSION_TIEMPO;
+        }
+
+        emit NuevaOferta(msg.sender, msg.value, fin);
+    }
+
+    function retirar() external {
+        uint256 monto = devoluciones[msg.sender];
+        require(monto > 0, "Nada que retirar");
+
+        uint256 fee = (monto * FEE_PORCENTUAL) / 100;
+        uint256 devuelto = monto - fee;
+
+        devoluciones[msg.sender] = 0;
+        acumuladoPorSubastador += fee;
+
+        payable(msg.sender).transfer(devuelto);
+
+        emit RetiroConFee(msg.sender, devuelto, fee);
+    }
+
+    function finalizarSubasta() external {
+        require(block.timestamp >= fin, "La subasta aun no ha terminado");
+        require(!finalizada, "La subasta ya fue finalizada");
+        require(msg.sender == subastador, "Solo el subastador puede finalizar");
+
+        finalizada = true;
+
+        if (ofertaMaxima > 0) {
+            payable(subastador).transfer(ofertaMaxima);
+        }
+
+        if (acumuladoPorSubastador > 0) {
+            payable(subastador).transfer(acumuladoPorSubastador);
+            acumuladoPorSubastador = 0;
+        }
+
+        emit SubastaFinalizada(mejorPostor, ofertaMaxima, acumuladoPorSubastador);
+    }
+
+    receive() external payable {
+        revert("No se acepta ETH directo");
+    }
+
+    fallback() external payable {
+        revert("Funcion no soportada");
+    }
+}
