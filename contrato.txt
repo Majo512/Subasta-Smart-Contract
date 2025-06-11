@@ -1,87 +1,176 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-contract SubastaAvanzadaConFee {
-    address public immutable subastador;
-    uint256 public ofertaBase;
-    uint256 public ofertaMaxima;
-    address public mejorPostor;
-    bool public finalizada;
+contract AdvancedAuctionWithFee {
+    address public immutable auctioneer;
+    uint256 public baseBid;
+    uint256 public highestBid;
+    address public highestBidder;
+    bool public ended;
 
-    uint256 public inicio;
-    uint256 public fin;
+    uint256 public startTime;
+    uint256 public endTime;
 
-    uint256 public acumuladoPorSubastador;
+    uint256 public feeAccumulated;
 
-    uint256 constant EXTENSION_TIEMPO = 10 minutes;
-    uint256 constant INCREMENTO_MINIMO_PORCENTUAL = 5;
-    uint256 constant FEE_PORCENTUAL = 2;
+    uint256 private constant TIME_EXTENSION = 10 minutes;
+    uint256 private constant MIN_BID_INCREASE_PERCENT = 5;
+    uint256 private constant FEE_PERCENT = 2;
 
-    mapping(address => uint256) public devoluciones;
+    mapping(address => uint256) public pendingReturns;
+    address [] privatebidders; // Track all bidders
 
-    event NuevaOferta(address indexed postor, uint256 cantidad, uint256 nuevoFin);
-    event SubastaFinalizada(address ganador, uint256 cantidad, uint256 totalComisiones);
-    event RetiroConFee(address indexed postor, uint256 devuelto, uint256 feeCobrado);
+    event NewBid (address indexed bidder, uint256 amount, uint256 newEndTime);
+    event Auction Ended (address winner, uint256 amount, uint256 totalFees);
+    event Withdrawal(address indexed bidder, uint256 amount, uint256 fee);
+    event Automatic Refund (address indexed bidder, uint 256 amount);
+    event Emergency ETH Recovery (address indexed recipient, uint 256 amount);
 
     constructor() {
-        subastador = msg.sender;
-        ofertaBase = 2 ether;
-        inicio = block.timestamp;
-        fin = block.timestamp + 2 days;
+        auctioneer = msg.sender;
+        baseBid = 2 ether;
+        startTime = block.timestamp;
+        endTime = block.timestamp + 2 days;
     }
 
-    function ofertar() external payable {
-        require(block.timestamp >= inicio, "La subasta aun no comienza");
-        require(block.timestamp <= fin, "La subasta ha finalizado");
-        require(!finalizada, "La subasta ya fue finalizada");
+    function bid () external payable {
+        require(block.timestamp >= startTime, "La subasta aun no comienza");
+        require(block.timestamp <= endTime, "La subasta ha finalizado");
+        require(!ended, "La subasta ya fue finalizada");
 
-        if (ofertaMaxima == 0) {
-            require(msg.value >= ofertaBase, "La oferta es menor al minimo base (2 ETH)");
+        if (highestBid == 0) {
+            require(msg.value >= baseBid, "La oferta es menor al minimo base (2 ETH)");
         } else {
-            uint256 incrementoMinimo = (ofertaMaxima * (100 + INCREMENTO_MINIMO_PORCENTUAL)) / 100;
-            require(msg.value >= incrementoMinimo, "Debe superar la oferta actual en al menos 5%");
+            uint256 minBid = (highestBid * (100 + MIN_BID_INCREASE_PERCENT)) / 100;
+            require(msg.value >= minBid, "Debe superar la oferta actual en al menos 5%");
         }
 
-        if (ofertaMaxima > 0) {
-            devoluciones[mejorPostor] += ofertaMaxima;
+        if (highestBid > 0) {
+            pendingReturns[highestBidder] += highestBid;
+        if (pendingReturns [highestBidder] == highestBid) {
+           bidders.push (highestBidder);
+           }
         }
 
-        mejorPostor = msg.sender;
-        ofertaMaxima = msg.value;
+        highestBidder = msg.sender;
+        highestBid = msg.value;
 
-        if (fin - block.timestamp <= EXTENSION_TIEMPO) {
-            fin = block.timestamp + EXTENSION_TIEMPO;
+        if (endTime - block.timestamp <= TIME_EXTENSION) {
+            endTime = block.timestamp + TIME_EXTENSION;
         }
 
-        emit NuevaOferta(msg.sender, msg.value, fin);
+        emit NewBid(msg.sender, msg.value, endTime);
     }
 
-    function retirar() external {
-        uint256 monto = devoluciones[msg.sender];
-        require(monto > 0, "Nada que retirar");
+    function withdraw(uint 256 amount) external {
+        uint256 available = pendingReturns[msg.sender];
+        require(available > 0, "Nada que retirar");
 
-        uint256 fee = (monto * FEE_PORCENTUAL) / 100;
-        uint256 devuelto = monto - fee;
+        uint256 toWithdraw = amount == 0? available: amount;
+        require (toWithdraw <= available, "Cantidad demasiado alta");
+        uint256 fee = (toWithdraw * FEE_PERCENT) / 100;
+        uint256 netAmount = toWithdraw-fee;
 
-        devoluciones[msg.sender] = 0;
-        acumuladoPorSubastador += fee;
+        pendingReturns[msg.sender] = available - toWithdraw;
+        feeAccumulated += fee;
 
-        payable(msg.sender).transfer(devuelto);
+        payable(msg.sender).transfer(netAmount);
 
-        emit RetiroConFee(msg.sender, devuelto, fee);
+        emit Withdrawal(msg.sender, netAmount, fee);
     }
 
-    function finalizarSubasta() external {
-        require(block.timestamp >= fin, "La subasta aun no ha terminado");
-        require(!finalizada, "La subasta ya fue finalizada");
-        require(msg.sender == subastador, "Solo el subastador puede finalizar");
+    function refundNonWinners() external {
+        require(endend, "La subasta aun no ha terminado");
+        require(msg.sender == auctioneer, "Solo el subastador puede finalizar");
 
-        finalizada = true;
+     uint256 totalBidders = bidders.length;
+     address currentBidder;
+     uint256 refundAmount;
+     uint256 fee;
 
-        if (ofertaMaxima > 0) {
-            payable(subastador).transfer(ofertaMaxima);
+     for (uint256 i=0; i< totalBidders; i ++){
+         currentBidder = bidders [i];
+
+        
+        if (currentBidder!= highestBidder && pendingReturns [currentBidder] > 0) {
+            refundAmount = pendingReturns [currentBidder];
+            fee = (refundAmount * FEE_PERCENT) /100;
+
+            pendingReturns [currentBidder] = 0;
+            fee Accumulated += fee;
+            payable(currentBidder).transfer(refundAmount - fee);
+            emit AutomaticRefund (currentBidder, refundAmount - fee);
+              }
+            }
         }
 
+     /**
+     * @notice End the auction and distribute funds
+     * @dev Only callable by auctioneer after auction time ends
+     */
+
+     function endAuction () external{
+            require (block.timestamp >= endTime, "Subasta en curso");
+            require (!ended, "Ya terminó");
+            require (msg.sender == auctioneer, "Solo subastador");
+            ended = true;
+
+     if (highestBid >0) {
+            payable (auctioneer) . transfer (highestBid);
+        }
+
+    uint256 fees = feeAccumulated;
+        if (fees >0) {
+           feeAccumulated = 0;
+           payable (auctioneer) . transfer (fees);
+         }
+
+    emit AuctionEnded (highestBidder, highestBid, fees);
+      }
+
+ /**
+ *@notice Emergency ETH recovery function
+ *@dev Only callable by auctioneer to recover accidentally sent ETH
+* @param recipient Address to send the ETH to
+*/
+
+function emergencyRecoverETH (address payable recipient) external {
+     require (msg.sender == auctioneer. "Solo subastador");
+     uint256 balance = address (this). balance-
+                       highestBid-
+                       feeAccumulated-
+                       calculateTotalPendingReturns ();
+
+     require (balance >0, "No se recupera ETH");
+     recipient.transfer (balance);
+
+    emit EmergencyETHRecovery (recipient, balance);
+    }
+
+
+/**
+* @dev Calculate total pending returns
+* @return total The sum of all pending returns
+*/
+
+function calculate Total Pending Returns () private view returns (uint256 total) {
+     uint256 totalBidders = bidders. length;
+     address currentBidder;
+
+    for (uint256 i=0; i<totalBidders; i++){
+        current Bidder = bidders [i];
+        total += pendingReturns [currentBidder];
+  }
+        return total;
+ }
+
+ receive () external payable {
+     revert ( "Direct ETH no permitido");
+}
+fallback () external payable {
+      revert ( "Invalid function");
+      }
+}
         if (acumuladoPorSubastador > 0) {
             payable(subastador).transfer(acumuladoPorSubastador);
             acumuladoPorSubastador = 0;
